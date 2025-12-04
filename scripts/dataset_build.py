@@ -36,24 +36,20 @@ def get_adjacency_matrix():
     
     # --- 定义物理因果边 (Source -> Target) ---
     
-    # 1. 动作层 -> 动力学层 (电机产生力和力矩)
-    adj[0, 1] = 1  # Act -> Accel (推力)
-    adj[0, 2] = 1  # Act -> Gyro  (力矩)
+    # ✅ 正确做法：降低但不完全切断
+    adj[3, 3] = 0.3  # 保留部分自连接（记忆历史）
     
-    # 2. 动力学层内部耦合 (姿态决定重力分量)
-    adj[2, 1] = 1  # Gyro -> Accel (耦合)
-    adj[1, 2] = 1  # Accel -> Gyro (耦合)
+    # 物理因果边
+    adj[0, 1] = 1  # Act -> Accel
+    adj[0, 2] = 1  # Act -> Gyro
+    adj[2, 1] = 1  # Gyro <-> Accel 耦合
+    adj[1, 2] = 1
+    adj[1, 3] = 1  # Accel_Z -> Baro（关键边）
+    adj[1, 4] = 1  # Accel_XY -> GPS
+    adj[2, 5] = 1  # Gyro_Z -> Mag
     
-    # 3. 动力学层 -> 观测层 (积分关系)
-    adj[1, 3] = 1  # Accel_Z -> Baro (高度积分)
-    adj[1, 4] = 1  # Accel_XY -> GPS (速度积分)
-    adj[2, 5] = 1  # Gyro_Z -> Mag (航向积分)
-    
-    # 4. 反向验证边 (可选)
-    # 观测层的数据反过来也可以辅助修正动力学层 (类似卡尔曼滤波的更新步)
-    # 如果为了强调因果检测，通常只保留单向；
-    # 如果为了更好的预测精度，可以加上双向。
-    # 这里我们暂时保持单向物理因果，让模型更敏感。
+    # 新增：Baro反向验证边（弱连接）
+    adj[3, 1] = 0.5  # Baro -> Accel（反向验证）
     
     return torch.FloatTensor(adj)
 
