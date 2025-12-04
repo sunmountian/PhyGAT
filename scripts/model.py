@@ -133,9 +133,49 @@ class PhyGAT_Fixed(nn.Module):
             return all_mu[:, -1], all_log_var[:, -1], all_attentions[:, -1]
 
 
+# class AttackDetector:
+#     """基于双重陷阱的异常检测器 - 修复版"""
+#     def __init__(self, phy_edges, threshold_res=3.0, threshold_struct=0.1):
+#         self.phy_edges = phy_edges
+#         self.threshold_res = threshold_res
+#         self.threshold_struct = threshold_struct
+    
+#     def detect(self, y_true, mu, sigma, attentions):
+#         """
+#         y_true: (B, T, N, F) 真实值
+#         mu: (B, T, N, F) 预测均值
+#         sigma: (B, T, N, F) 预测标准差
+#         attentions: (B, T, N, N) 注意力权重
+        
+#         返回: (B, T) 异常得分
+#         """
+#         B, T, N, F = y_true.shape
+        
+#         # 1. 残差异常得分 S_res - 使用标准化残差
+#         residual = torch.abs(y_true - mu)
+#         residual_normalized = (residual - residual.mean()) / (residual.std() + 1e-6)
+#         S_res = residual_normalized.mean(dim=(2, 3))  # (B, T)
+        
+#         # 2. 结构异常得分 S_struct
+#         S_struct = torch.zeros(B, T).to(y_true.device)
+        
+#         for src, tgt in self.phy_edges:
+#             alpha_phy = attentions[:, :, tgt, src]  # (B, T)
+#             # 降低期望阈值，更容易触发
+#             violation = torch.relu(0.1 - alpha_phy)
+#             S_struct += violation
+        
+#         S_struct = S_struct / len(self.phy_edges)
+        
+#         # 3. 融合判决 - 增加权重
+#         anomaly_score = 2.0 * S_res + 5.0 * S_struct
+        
+#         return anomaly_score, S_res, S_struct
+
 class AttackDetector:
     """基于双重陷阱的异常检测器 - 修复版"""
-    def __init__(self, phy_edges, threshold_res=3.0, threshold_struct=0.3):
+    # 建议将 threshold_struct 默认值改为 0.1，与训练保持一致
+    def __init__(self, phy_edges, threshold_res=3.0, threshold_struct=0.1):
         self.phy_edges = phy_edges
         self.threshold_res = threshold_res
         self.threshold_struct = threshold_struct
@@ -144,30 +184,39 @@ class AttackDetector:
         """
         y_true: (B, T, N, F) 真实值
         mu: (B, T, N, F) 预测均值
-        sigma: (B, T, N, F) 预测标准差
+        sigma: (B, T, N, F) 预测标准差 (不确定性)
         attentions: (B, T, N, N) 注意力权重
-        
-        返回: (B, T) 异常得分
         """
         B, T, N, F = y_true.shape
         
-        # 1. 残差异常得分 S_res - 使用标准化残差
-        residual = torch.abs(y_true - mu)
-        residual_normalized = (residual - residual.mean()) / (residual.std() + 1e-6)
-        S_res = residual_normalized.mean(dim=(2, 3))  # (B, T)
+        # === 1. 残差异常得分 S_res ===
+        # 错误做法 (原代码): (residual - mean) / std -> 导致攻击被抹平
+        # 正确做法: 使用预测的 sigma 进行标准化 (Mahalanobis 距离的思想)
+        # Score = |True - Pred| / Sigma
         
-        # 2. 结构异常得分 S_struct
+        residual = torch.abs(y_true - mu)
+        
+        # 加上 1e-6 防止除零
+        # 维度: (B, T, N, F)
+        z_score = residual / (sigma + 1e-6) 
+        
+        # 对所有节点和特征取平均，得到每个时间步的异常分
+        # (B, T)
+        S_res = z_score.mean(dim=(2, 3)) 
+        
+        # === 2. 结构异常得分 S_struct ===
         S_struct = torch.zeros(B, T).to(y_true.device)
         
         for src, tgt in self.phy_edges:
             alpha_phy = attentions[:, :, tgt, src]  # (B, T)
-            # 降低期望阈值，更容易触发
-            violation = torch.relu(0.3 - alpha_phy)
+            # 阈值建议与训练时保持一致 (0.1)
+            violation = torch.relu(self.threshold_struct - alpha_phy)
             S_struct += violation
         
-        S_struct = S_struct / len(self.phy_edges)
+        S_struct = S_struct / (len(self.phy_edges) + 1e-6)
         
-        # 3. 融合判决 - 增加权重
-        anomaly_score = 2.0 * S_res + 5.0 * S_struct
+        # === 3. 融合判决 ===
+        # 动态调整权重，通常残差是最直接的证据
+        anomaly_score = S_res + 10.0 * S_struct
         
         return anomaly_score, S_res, S_struct

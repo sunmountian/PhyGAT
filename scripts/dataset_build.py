@@ -50,7 +50,7 @@ def get_adjacency_matrix():
     
     # 新增：Baro反向验证边（弱连接）
     adj[3, 1] = 0.5  # Baro -> Accel（反向验证）
-    
+    adj = adj.T
     return torch.FloatTensor(adj)
 
 # ================= 2. PyTorch 数据集类 =================

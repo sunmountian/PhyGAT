@@ -9,7 +9,7 @@ def physics_contrast_loss(attentions, adj_mask, conflict_mask=None):
     物理对比损失 - 完全重写版
     
     目标：
-    1. 物理边的权重应该 > 0.3
+    1. 物理边的权重应该 > 0.1
     2. 非物理边的权重应该 < 0.1
     3. 冲突时，标记的边权重应该 < 0.1
     """
@@ -24,9 +24,9 @@ def physics_contrast_loss(attentions, adj_mask, conflict_mask=None):
         non_phy_edges = (adj_mask == 0)
         
         # Loss 1: 物理边权重不足的惩罚
-        # 期望每条物理边的权重 > 0.3
+        # 期望每条物理边的权重 > 0.1
         phy_weights = attentions * phy_edges.unsqueeze(0)  # (B, N, N)
-        phy_violations = torch.relu(0.3 - phy_weights)  # 低于0.3就惩罚
+        phy_violations = torch.relu(0.1 - phy_weights)  # 低于0.3就惩罚
         loss_phy = phy_violations.sum() / (phy_edges.sum() * B + 1e-6)
         
         # Loss 2: 非物理边权重过高的惩罚
@@ -145,7 +145,7 @@ def train_with_contrast(model, train_loader, test_loader, adj_mask,
             loss_contrast_normal = physics_contrast_loss(attn, adj_mask)
             
             # === 对比学习：冲突样本 ===
-            x_conflict, conflict_mask = create_conflict_batch(x_batch, conflict_ratio=0.3)
+            x_conflict, conflict_mask = create_conflict_batch(x_batch, conflict_ratio=0.1)
             _, _, attn_conflict = model(x_conflict, adj_mask, return_all_steps=False)
             loss_contrast_conflict = physics_contrast_loss(attn_conflict, adj_mask, conflict_mask)
             
@@ -219,7 +219,7 @@ def train_with_contrast(model, train_loader, test_loader, adj_mask,
     plt.xlabel('Epoch')
     plt.ylabel('Loss')
     plt.legend()
-    plt.grid(True, alpha=0.3)
+    plt.grid(True, alpha=0.1)
     plt.savefig('training_curve.png')
     print("Saved training curve to 'training_curve.png'")
 
